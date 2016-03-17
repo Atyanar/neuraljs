@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Demo neuraljs</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/3.0.0/math.min.js"></script>
+    <script src="src/neural.js"></script>
+    <script type="text/javascript"> 
+        /*
+        var weightsMat = new RNN.RandMat(10, 4); // weights Mat
+        var inputMat = new RNN.RandMat(4, 1); // random input Mat
+        var biasVector = new RNN.RandMat(10, 1); // bias vector
+
+        // matrix multiply followed by bias offset. h is a Mat
+        var G = new RNN.Graph();
+        var h = G.add(G.mul(weightsMat, inputMat), biasVector); 
+        // the Graph structure keeps track of the connectivities between Mats
+
+        // we can now set the loss on h
+        h.dw[0] = 1.0; // say we want the first value to be lower
+
+        // propagate all gradients backwards through the graph
+        // starting with h, all the way down to W,x,b
+        // i.e. this sets .dw field for W,x,b with the gradients
+        G.backward();
+
+        // do a parameter update on W,b:
+        var s = new RNN.Solver(); // the Solver uses RMSProp
+        // update W and b, use learning rate of 0.01, 
+        // regularization strength of 0.0001 and clip gradient magnitudes at 5.0
+        var model = {'W':weightsMat, 'b':biasVector};
+        s.step(model, 0.01, 0.0001, 5.0)
+    */
+
+        // data I/O
+        var text = "This is a text that will be input. HHHHHHHHHHHH. Oh my god this will never stop. Crap Crap Crap. "
+        var chars = [];
+        for (var i = 0, len = text.length; i < len; i++) {
+            if (chars.indexOf(text.charAt(i)) === -1) {chars.push(text.charAt(i))};
+        }
+
+        var data_size = text.length;
+        var vocab_size = chars.length;
+
+        var char_to_index = function(char){
+            return chars.indexOf(char);
+        }
+
+        var index_to_char = function(index) {
+            return chars[index];
+        }
+        
+        var softmax = function(m) {
+          var out = math.zeros(math.size(m)); // probability volume
+          var maxValue = -999999;
+
+          m.forEach( function(value, index, matrix) {
+            if (value > maxValue) {maxValue = value;}
+          });
+
+          var s = 0.0;
+          m.forEach( function(value, index, matrix) {
+            //out[index] = math.exp(value - maxValue);
+            var mathIndex = math.index(index[0], index[1]);
+            out.subset(mathIndex, Math.exp(value - maxValue));
+            s += out.subset(mathIndex);
+          });
+          out.forEach( function(value, index, matrix) {
+            var mathIndex = math.index(index[0], index[1]);
+            out.subset(mathIndex, value / s);
+          });
+
+          // no backward pass here needed
+          // since we will use the computed probabilities outside
+          // to set gradients directly on m
+          return out;
+        }
+
+        function lossFunction(inputs, targets, hprev){
+            // inputs and targets are lists of integers
+            // hprev is Hx1 array of initial hidden state
+            // returns the loss, gradients on model parameters, and last hidden state
+
+            var xs = [];
+            var hs = [];
+            var ys = [];
+            var ps = [];
+            hs[-1] = hprev;
+            var loss = 0;
+
+            //forward pass
+            console.log(inputs.length);
+            for (t = 0, len = inputs.length; t < len; t++) {
+                xs[t] = math.zeros(vocab_size,1); //vector of 0's
+                xs[t][inputs[t]] = 1; // encoded in 1-of-k representation
+                var test = math.add(math.multiply(Wxh, xs[t]),math.add(math.multiply(Whh, hs[t-1]),bh));
+                hs[t] = math.tanh(test);
+                ys[t] = math.add(math.multiply(Why, hs[t]), by);
+                var test2 = math.sum(math.exp(ys[t]));
+                ps[t] = math.divide(math.exp(ys[t]),test2) ; // probabilities for next chars
+
+                loss += - softmax(ps[t]); // 
+
+            }
+
+            //backward pass: compute gradients going backwards
+            var dWxh = math.zeros(math.size(Wxh));
+            var dWhh = math.zeros(math.size(Whh));
+            var dWhy = math.zeros(math.size(Why));
+            var dbh = math.zeros(math.size(bh));
+            var dby = math.zeros(math.size(by));
+
+
+            var dhnext = math.zeros(math.size(hs[0]));
+
+
+            // reverse order
+            for(t = inputs.length-1; t >= 0; t--) {
+                var dy = ps[t];
+                var indextt = math.index(targets[t],0);
+                dy[targets[t]] = math.subtract(dy.subset(indextt),1); //backprop into y //this is a number
+
+                dWhy = math.add(math.multiply(dy, math.transpose(hs[t])),dWhy);
+                
+                dby = math.add(dy,dby);
+                dh = math.add(math.multiply(math.transpose(Why),dy),dhnext); // backprop into h
+                console.log(math.multiply(hs[t], hs[t]));
+                console.log(dh);
+                dhraw = math.multiply(math.subtract(1, math.multiply(hs[t], hs[t])), dh);
+                //dhraw = (1 - hs[t] * hs[t]) * dh; // backprop through tanh nonlinearity
+                console.log(dhraw);
+                dbh = math.add(dbh,dhraw);
+                dWxh = math.add(math.multiply(dhraw, math.transpose(xs[t])),dWxh);
+                dWhh = math.add(math.multiply(dhraw, math.transpose(hs[t-1])),dWhh);
+                dhnext = math.multiply(math.transpose(Whh), dhraw);
+                
+
+            }
+            /*
+
+            add clipping:
+
+            for dparam in [dWxh, dWhh, dWhy, dbh, dby]:
+            np.clip(dparam, -5, 5, out=dparam) # clip to mitigate exploding gradients
+            */
+
+            return {
+                loss : loss, 
+                dWxh: dWxh, 
+                dWhh: dWhh, 
+                dWhy: dWhy, 
+                dbh: dbh, 
+                dby: dby, 
+                hpev: hs[inputs.length -1] };
+        }
+
+        function sample(h, seed_index, n){
+            // sample a sequence of integers from the model
+            // h is memory state, seed_index is seed letter for the first time step
+            x = math.zeros(vocab_size,1);
+            x[seed_index] = 1;
+            var ixes = [];
+            for (t = 0; t < n; t++) {
+                h = math.tanh(math.add(math.add(math.multiply(Wxh, x), math.multiply(Whh,h)),bh));
+                y = math.add(math.multiply(Why,h),by);
+                p = math.exp(y) / math.sum(math.exp(y));
+                ix = Math.floor(Math.random() * vocab_size);
+                // ix = np.random.choice(range(vocab_size), p=p.ravel())
+                x = math.zeros(vocab_size, 1);
+                x[ix] = 1;
+                ixes.push(ix);
+            }
+            return ixes;
+        }
+        //hyperparameters
+        var hidden_size = 100;
+        seq_length = 10;
+        learning_rate = 0.01;
+
+        //model parameters
+        Wxh = math.random([hidden_size, vocab_size]);
+        Whh = math.random([hidden_size, hidden_size]);
+        Why = math.random([vocab_size, hidden_size]);
+        bh = math.zeros(hidden_size, 1);
+        by = math.zeros(vocab_size, 1);
+
+        var n = 0;
+        var p = 0;
+        var mWxh = math.zeros(math.size(Wxh));
+        var mWhh = math.zeros(math.size(Whh));
+        var mWhy = math.zeros(math.size(Why));
+        var mbh = math.zeros(math.size(bh));
+        var mby = math.zeros(math.size(by));
+        var smooth_loss = - math.log(1.0/vocab_size) * seq_length; // loss at iteration zero
+        while (true) {
+            // prepare inputs - we are sweeping from left to right in steps seq_length long
+            if ((p+seq_length+1 >= text.length) || (n === 0)) {
+                hprev = math.zeros(hidden_size,1); // reset RNN memory
+                p = 0; // go from start of data
+            }
+            inputs = [];
+            targets = [];
+            for (i = p; i <= p+seq_length; i++) {
+                inputs.push(char_to_index(text[i]));
+                targets.push(char_to_index(text[i+1]));
+            }
+
+            // sample from the model now and then
+            if ( (n % 100) === 0) {
+                sample_ix = sample(hprev, inputs[0], 200);
+                txt = '';
+                for (i = 0; i < sample_ix.length; i++) {
+                    txt = txt + index_to_char(sample_ix[i]);  
+                }
+                console.log(txt);
+            }
+
+            // forward seq_length characters through the net and fetch gradient
+            lossReturn = lossFunction(inputs, targets, hprev);
+            loss = lossReturn.loss;
+            dWxh = lossReturn.dWxh;
+            dWhh = lossReturn.dWhh;
+            dWhy = lossReturn.dWhy;
+            dbh = lossReturn.dbh;
+            dby = lossReturn.dby;
+            hprev = lossReturn.hprev; 
+            smooth_loss = smooth_loss * 0.999 + loss * 0.001;
+            if ( n % 100 === 0) {
+                console.log("iteration: " + n + " ; loss: " + smooth_loss );
+            }
+
+            // perform parameter update with Adagrad
+            mWxh += dWxh + dWxh;
+            Wxh += -learning_rate * dWxh / math.sqrt(mWxh + 1e-8);
+
+            mWhh += dWhh + dWhh;
+            Whh += -learning_rate * dWhh / math.sqrt(mWhh + 1e-8);
+
+            mWhy += dWhy + dWhy;
+            Why += -learning_rate * dWhy / math.sqrt(mWhy + 1e-8);
+
+            mbh += dbh + dbh;
+            bh += -learning_rate * dbh / math.sqrt(mbh + 1e-8);
+
+            mby += dby + dby;
+            by += -learning_rate * dby / math.sqrt(mby + 1e-8);
+
+
+            p += seq_length;
+            n += 1;
+            if (n >= 1000) {break;};
+        }
+
+
+        /*
+        var input = math.matrix([[0,0,0,5]]);
+        var rnn = new RNN.RNN(4,1,4);
+        var output = rnn.computeForwardPass(input);
+        var target = 7;
+        var cost = rnn.lossFunction(output, target);
+        rnn.computeBackwardPass(cost);
+        */
+    </script>
+</head>
+<body>
+    <h1> Test </h1>
+</body>
+</html>
