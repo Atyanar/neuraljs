@@ -115,8 +115,8 @@
 
             // reverse order
             for(t = inputs.length-1; t >= 0; t--) {
-                var dy = ps[t];
-                var indextt = math.index(targets[t],0);
+                var dy = ps[t].clone();
+a                var indextt = math.index(targets[t],0);
                 dy[targets[t]] = math.subtract(dy.subset(indextt),1); //backprop into y //this is a number
 
                 dWhy = math.add(math.multiply(dy, math.transpose(hs[t])),dWhy);
