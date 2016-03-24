@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>NeuralJS demo</title>
+    <style>
+        body {
+            padding: 20px;
+            color: #333;
+            font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+        }
+        #wrap {
+            width: 1000px;
+            margin-right: auto;
+            margin-left: auto;
+            margin-bottom: 200px;
+        }
+        .abutton {
+            width: 120px;
+            height: 30px;
+            margin: 10px 10px 10px 10px;
+        }
+    </style>
+    <link href="external/jquery-ui.min.css" rel="stylesheet">
+    <script src="external/jquery-1.12.1.js"></script>
+    <script src="external/jquery-ui.min.js"></script>
+    <script src="src/mine.js"></script>
+    <script type="text/javascript">
+        var letterSize = 5; // size of letter embeddings
+        var regularizationConstant = 0.000001; // L2 regularization strength
+        var learningRate = 0.01;
+        var clipValue = 5.0; // clip gradients at this value
+        var numberSamples = 5;
+        var dataSentences = [];
+        var vocabulary = [];
+        var letterToIndex = [];
+        var indexToLetter = [];
+        var network = {};
+        var inputSize = -1;
+        var outputSize = -1;
+        var epochSize = -1; // TODO: what is an epoch?
+
+        var initVocabulary = function(sentences, countThreshold) {
+            // go over all characters and keep track of all unique ones seen
+            var text = sentences.join('');
+
+            // count all characters
+            var d = {};
+            for (var i = 0, n = text.length; i < n; i++) {
+                var textI = text[i];
+                if (textI in d) { d[textI] += 1; }
+                else { d[textI] = 1; }
+            }
+
+            // filter by countThreshold
+            vocabulary = [];
+            letterToIndex = [];
+            indexToLetter = [];
+            var q = 1;
+            for (var character in d) {
+                if (d.hasOwnProperty(character)) {
+                    if (d[character] >= countThreshold) {
+                        // add character to vocabulary
+                        letterToIndex[character] = q;
+                        indexToLetter[q] = character;
+                        vocabulary.push(character);
+                        q++;
+                    }
+                }
+            }
+
+            inputSize = vocabulary.length + 1;
+            outputSize = vocabulary.length + 1;
+            epochSize = sentences.length;
+            // TODO: output the different characters you found
+
+        }
+
+        var reinit = function() {
+            // process the input TODO: maybe filter out blanks?
+            var dataSentencesRaw = $('#textInput').val().split('\n');
+            dataSentences = dataSentencesRaw.map(function(currentValue) {
+                return currentValue.trim();
+            })
+            initVocabulary(dataSentences, 1);
+
+            var networkType = $('input[name=radioNetwork]:checked').val();
+
+            network = new Neuraljs.NeuralNetwork(networkType);
+
+            var hiddenSizes = $('#NetworkSize').val();
+            network.initialize(inputSize, hiddenSizes, outputSize);
+            network.generateInputMatrix(letterSize);
+        }
+
+        var costFunction = function(sentence){
+            n = sentence.length;
+            for (var i = -1; i < n; i++) {
+                var source = 0; // TODO: change value to actual vector
+                var target = 0;
+                network.costFunction(source, target);
+            }
+
+        }
+
+        var tickCount = 0;
+        var tick = function() {
+            // TODO: write
+            // sample sentence from data
+            var sentenceIndex = Math.random() * dataSentences.length;
+            var sentence = dataSentences[sentenceIndex];
+
+            var time0 = (new Date()).getTime();
+
+            // evaluate cost of a sentence
+            for (var i = -1; i < sentence.length; i++) {
+                // start and end token are zeros
+                var sourceIndex = (i === -1 ? 0 : letterToIndex[sentence[i]]);
+                var targetIndex = (i === n-1 ? 0 : letterToIndex[sentence[i+1]]);
+
+                network.costFunction(network.getInputVector(sourceIndex), network.getInputVector(targetIndex)); // TODO: add useful return value
+
+            }
+            // TODO: evaluate accumulated output of the costFunction
+
+
+
+            //compute backpropagation
+            network.backward();
+
+            // perform parameter update
+            network.parameterUpdate(learningRate, regularizationConstant, clipValue); // TODO: make it so that these parameters are optional
+
+            var time1 = (new Date()).getTime;
+            var tickTime = time1 - time0;
+            tickCount++;
+            if (tickCount % 50 === 0) {
+                $('#samples').html('');
+                for (var j = 0; j < numberSamples; j++) {
+                    var prediction = network.predictOutput();
+                    var predictionDiv = 'div class="aprediction">' + prediction + '</div>';
+                    $('#samples').append(predictionDiv);
+                }
+            }
+
+
+        }
+
+        var iid = null;
+        $(function() {
+
+            // attach button handlers
+            $('#learn').click(function() {
+                reinit();
+                if (iid !== null) { clearInterval(iid); }
+                iid = setInterval(tick, 0);
+            });
+            $('#stop').click(function() {
+                if (iid !== null) { clearInterval(iid); }
+                iid = null;
+            });
+            $('#resume').click(function() {
+                if (iid !== null) {
+                    iid = setInterval(tick, 0);
+                }
+            });
+
+            $('#learn').click(); // simulate click on startup
+        })
+
+    </script>
+
+
+</head>
+<body>
+
+<div id="wrap">
+    <h1>NeuralJS demo</h1>
+    <div id="intro">
+        This is a demo for the Neuraljs javascript library. It allows you to train Recurrent Neural Networks (RNN),
+        Long Short-Term Memory Networks (LSTM) and Gated Recurrent Units (GRU). <br>
+
+        To demonstrate the behaviour we will take a text - a sequence of characters - as input and let the neural network predict
+        the next character in the sequence.
+    </div>
+    <div>
+        <div class="heading">Input text:</div>
+        <textarea style="width:100%;height:200px;" id="textInput">
+            Put your input text here.
+        </textarea>
+    </div>
+    <div class="heading">Options:</div>
+    <button id="learn" class="abutton">learn/restart</button>
+    <button id="resume" class="abutton">resume</button>
+    <button id="stop" class="abutton">pause</button>
+    <form>
+        <fieldset>
+            <input type="radio" id="RNNRadio" name="radioNetwork" value="RNN"> Recurrent Neural Network (RNN) <br>
+            <input type="radio" id="LSTMRadio" name="radioNetwork" value="LSTM" checked="checked"> Long Short-Term Memory (LSTM) <br>
+            <input type="radio" id="GRURadio" name="radioNetwork" value="GRU"> Gated Recurrent Unit (GRU) <br>
+        </fieldset>
+        List of sizes of the hidden layers:
+        <input type="text" name="sizeOfNetwork" id="NetworkSize" value="[30,30,30,30]">
+    </form>
+
+    <h2> Generated sample sentences: </h2>
+    <div id="samples">
+
+    </div>
+</div>
+
+</body>
+</html>

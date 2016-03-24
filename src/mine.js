@@ -274,17 +274,339 @@ var Neuraljs = {};
         return out;
     }
 
+    var forwardRNN = function(graph, previousNodes, hiddenSizes, sourceVector){
+        // sourceVector is a 1D vector with observations
+        var previousHiddenNodes = [];
+        if (typeof previousNodes.h === 'undefined') {
+            for (var depth = 0; depth < hiddenSizes.length; depth++) {
+                previousHiddenNodes.push(new Matrix(hiddenSizes[depth],1));
+            }
+        } else {
+            previousHiddenNodes = previousNodes.h;
+        }
+
+        var hiddenResults = [];
+        for (var depth = 0; depth < hiddenSizes.length; depth++) {
+
+            var inputVector = (depth === 0 ? sourceVector : hiddenResults[depth - 1]);
+            var previousHiddenNode = previousHiddenNodes[depth];
+
+            // take input
+            var hidden0 = graph.mul(model['Wxh' + depth], inputVector);
+            // take state of previous hidden unit
+            var hidden1 = graph.mul(model['Whh' + depth], previousHiddenNode);
+
+            // add hidden0, hidden1 and the hidden bias vector, then perform relu
+            var hidden_depth = graph.relu(graph.add(graph.add(hidden0, hidden1), model['bhh' + depth]));
+
+            hiddenResults.push(hidden_depth);
+        }
+
+        // decode result of last hidden node to output
+        var output = graph.add(graph.mul(model['Whd'], hiddenResults[hiddenResults.length - 1]), model['bd']);
+
+        // return hidden representation and output
+        // TODO: original: return {'h':hiddenResults, 'o': output};
+
+    };
+
+    var forwardGRU = function(graph, previousNodes, hiddenSizes, sourceVector){
+
+    };
+
+    var forwardLSTM = function(graph, previousNodes, hiddenSizes, sourceVector){
+        var previousHiddenNodes = [];
+        var previousCells = [];
+        if (typeof previousNodes.h === 'undefined') {
+            for (var depth = 0; depth < hiddenSizes.length; depth++) {
+                previousHiddenNodes.push( new Matrix(hiddenSizes[depth]), 1);
+                previousCells.push(new Matrix(hiddenSizes[depth]),1);
+            }
+        } else {
+            previousHiddenNodes = previousNodes.h;
+            previousCells = previousNodes.c;
+        }
+
+        var hiddenResults = [];
+        var cellResults = [];
+        for (var depth = 0; depth < hiddenSizes.length; depth++) {
+            var inputVector = ( depth === 0 ? sourceVector : hiddenResults[depth-1]);
+            var previousHiddenNode = previousHiddenNodes[depth];
+            var previousCell = previousCells[depth];
+
+            // input gate
+            var hidden0 = graph.mul(model['Wixh' + depth], inputVector);
+            var hidden1 = graph.mul(model['Wihh' + depth], previousHiddenNode);
+            // add hidden0, hidden1 and the input bias vector, then perform sigmoid
+            var inputGate = graph.sigmoid(graph.add(graph.add(hidden0, hidden1), model['bi' + depth]));
+
+            //forget gate
+            var hidden2 = graph.mul(model['Wfxh' + depth], inputVector);
+            var hidden3 = graph.mul(model['Wfhh' + depth], previousHiddenNode);
+            // add hidden2, hidden3 and the forget bias vector, then perform sigmoid
+            var forgetGate = graph.sigmoid(graph.add(graph.add(hidden2, hidden3), model['bf' + depth]));
+
+            // output gate
+            var hidden4 = graph.mul(model['Woxh' + depth], inputVector);
+            var hidden5 = graph.mul(model['Wohh' + depth], previousHiddenNode);
+            // add hidden4, hidden5 and the output bias vector, then perform sigmoid
+            var outputGate = graph.sigmoid(graph.add(graph.add(hidden4, hidden5), model['bo' + depth]));
+
+            // write operation on cells
+            var hidden6 = graph.mul(model['Wcxh' + depth], inputVector);
+            var hidden7 = graph.mul(model['Wchh' + depth], previousHiddenNode);
+            var cellWrite = graph.tanh(graph.add(graph.add(hidden6, hidden7), model['bc' + depth]));
+
+            // compute new cell activation
+            var retainCell = graph.eltmul(forgetGate, previousCell); // what we keep from cell
+            var writeCell = graph.eltmul(inputGate, cellWrite); // what we write to cell
+            var cellAtDepth = graph.add(retainCell, writeCell); // new cell contents
+
+            // compute hidden state as gated, saturated cell activations
+            var hiddenAtDepth = graph.eltmul(outputGate, graph.tanh(cellAtDepth));
+
+            hiddenResults.push(hiddenAtDepth);
+            cellResults.push(cellAtDepth);
+        }
+
+        // decode results of last hidden unit to output
+        var output = graph.add(graph.mul(model['Whd'], hiddenResults[hiddenResults.length - 1], model[bd]));
+
+        // return cell memory, hidden representation and output
+        // TODO: original:     return {'h':hidden, 'c':cell, 'o' : output};
+
+
+    };
+
+
     var NeuralNetwork = function(type) {
         if (typeof type === 'undefined' || type === 'LSTM') {
-
+            this.type = 'LSTM';
         }
         else if (type === 'RNN') {
-
+            this.type = 'RNN';
         }
         else if (type === 'GRU') {
-
+            this.type = 'GRU';
+        } else {
+            throw new Error('Unknown type of NeuralNetwork');
         }
-        throw new Error('Unknown type for NeuralNetwork');
+
+        this.model = {};
+        this.graph = new Graph(true);
+        this.previousNodes = {};
+
+        // variables for parameter update with default values
+        this.decayRate = 0.999;
+        this.smoothEps = 1e-8;
+        this.stepCache = {};
+        this.clipValue = 5.0;
+        this.regularizationConstant = 0.000001;
+
+    };
+
+    NeuralNetwork.prototype = {
+        initialize: function(inputSize, hiddenSizes, outputSize, options) {
+            this.inputSize = inputSize;
+            this.hiddenSizes = hiddenSizes;
+            this.outputSize = outputSize;
+            for (var depth = 0; depth < hiddenSizes.length; depth++) {
+                var prevSize = (depth === 0 ? inputSize : hiddenSizes[depth - 1]);
+                var hiddenSize = hiddenSizes[depth];
+
+                switch (this.type) {
+                    case 'RNN':
+                        //input to hidden
+                        this.model['Wxh' + depth] = new RandomMatrix(hiddenSize, prevSize, 0.08);
+                        //hidden to hidden
+                        this.model['Whh' + depth] = new RandomMatrix(hiddenSize, hiddenSize, 0.08);
+                        // hidden bias vector
+                        this.model['bhh' + depth] = new Matrix(hiddenSize, 1);
+                        break;
+
+                    case 'GRU':
+                        // TODO: to be implemented
+                        break;
+
+                    case 'LSTM':
+                        // gates parameters
+                        // input gate: - input to hidden, hidden to hidden and bias vector
+                        this.model['Wixh' + depth] = new RandomMatrix(hiddenSize, prevSize, 0.08);
+                        this.model['Wihh' + depth] = new RandomMatrix(hiddenSize, hiddenSize, 0.08);
+                        this.model['bi' + depth] = new RandomMatrix(hiddenSize, 1);
+                        // forget gate: input to hidden, hidden to hidden and bias vector
+                        this.model['Wfxh' + depth] = new RandomMatrix(hiddenSize, prevSize, 0.08);
+                        this.model['Wfhh' + depth] = new RandomMatrix(hiddenSize, hiddenSize, 0.08);
+                        this.model['bf' + depth] = new RandomMatrix(hiddenSize, 1);
+                        // output gate: input to hidden, hidden to hidden and bias vector
+                        this.model['Woxh' + depth] = new RandomMatrix(hiddenSize, prevSize, 0.08);
+                        this.model['Wohh' + depth] = new RandomMatrix(hiddenSize, hiddenSize, 0.08);
+                        this.model['bo' + depth] = new RandomMatrix(hiddenSize, 1);
+
+                        // cell write parameters
+                        this.model['Wcxh' + depth] = new RandomMatrix(hiddenSize, prevSize, 0.08);
+                        this.model['Wchh' + depth] = new RandomMatrix(hiddenSize, hiddenSize, 0.08);
+                        this.model['bc' + depth] = new RandomMatrix(hiddenSize, 1);
+
+                        break;
+
+                    default:
+                        throw new Error('Unknown type of NeuralNetwork');
+                }
+
+            }
+            // decoder parameters
+            this.model['Whd'] = new RandomMatrix(outputSize, hiddenSize, 0.08);
+            this.model['bd'] = new Matrix(outputSize, 1);
+
+            // options
+            if (typeof options != 'undefined') {
+                if (options['clipValue'] != 'undefined') {
+                    this.clipValue = options['clipValue'];
+                }
+                if (options['regularizationConstant'] != 'undefined') {
+                    this.regularizationConstant = options['regularizationConstant'];
+                }
+            }
+
+        },
+        forward: function(graph, sourceVector) {
+            if (typeof graph === 'undefined') { graph = this.graph};
+            switch(this.type) {
+                case 'RNN':
+                    return forwardRNN(graph, this.previousNodes, this.hiddenSizes, sourceVector);
+                    break;
+                case 'GRU':
+                    return forwardGRU(graph, this.previousNodes, this.hiddenSizes, sourceVector);
+                    break;
+                case 'LSTM':
+                    return forwardLSTM(graph, this.previousNodes, this.hiddenSizes, sourceVector);
+                    break;
+                default:
+                    throw new Error('Unknown type of NeuralNetwork');
+            }
+        },
+        parameterUpdate: function() {
+            var statistics = {};
+            var numberClipped = 0;
+            var numberTotalOperations = 0;
+            for (var key in model) {
+                if (model.hasOwnProperty(key)) {
+                    var matrix = model[key];
+                    if (!(k in this.stepCache)) {
+                        this.stepCache[key] = new Matrix(matrix.rows, matrix.columns);
+                    }
+                    var s = this.stepCache[key];
+                    for (var i = 0, n = matrix.w.length; i < n; i++) {
+
+                        // rmsprop adaptive learning rate
+                        var matrixDwi = matrix.dw[i];
+                        s.w[i] = s.w[i] * this.decayRate + (1.0 - this.decayRate) * matrixDwi * matrixDwi;
+
+                        // gradient clip
+                        if (matrixDwi > this.clipValue) {
+                            matrixDwi = this.clipValue;
+                            numberClipped++;
+                        }
+                        if (matrixDwi < -this.clipValue) {
+                            matrixDwi = -this.clipValue;
+                            numberClipped++;
+                        }
+                        numberTotalOperations++;
+
+                        // update and regularize
+                        // TODO: get stepSize
+                        matrix.w[i] += - stepSize * matrixDwi / Math.sqrt(s.w[i] + this.smoothEps) - this.regularizationConstant * m.w[i];
+                        matrix.dw[i] = 0; // reset gradients for next iteration
+                    }
+                }
+            }
+            statistics['ratioClipped'] = numberClipped / numberTotalOperations;
+            return statistics;
+        },
+        predictOutput: function(temperature) { // TODO: think about input and output
+            if (typeof temperature === 'undefined') { temperature = 1.0; }
+            var graph = new Graph(false);
+
+            var lh = this.forward(graph);
+            // prev = lh; // TODO:
+            var logProbabilities = lh.output;
+
+
+            if (temperature !== 1.0 && useSamplei) { // TODO: add useSamplei
+                // scale log probabilities by temperature
+                // if the temperature is high, log probabilities will go towards zero
+                // and the softmax output will be more diffuse, otherwise it will be more peaky
+                for (var q = 0, n = logProbabilities.w.length; q < n; q++) {
+                    logprobs.w[q] /= temperature;
+                }
+            }
+
+            var probabilities = softmax(logProbabilities);
+            var index;
+            if (useSamplei) {
+                index = samplei(probabilities.w);
+            } else {
+                index = maxi(probabilities.w);
+            }
+
+            return index;
+
+        },
+        costFunction: function(sourceVector, target) {
+            var logToPerplexity = 0.0;
+            var cost = 0.0;
+            var graph = this.graph;
+            var lh = this.forward(graph, sourceVector);
+            // prev =
+            var logProbabilities = lh.output;
+            var probabilities = softmax(logProbabilities);
+
+            // TODO: refactor for source and target
+            logToPerplexity += Math.log2(probabilities.w[ix_target]); // accumulate base 2 log prob and do smoothing TODO: ix_target
+            cost += -Math.log(probabilities.w[ix_target]); // TODO: ix_target
+
+            // write gradients into logProbabilities;
+            logProbabilities.dw = probabilities.w;
+            logProbabilities.dw[ix_target] -= 1;
+        },
+        generateInputMatrix: function(diversificationSize) {
+            this.model['WInput'] = new RandomMatrix(this.inputSize, diversificationSize, 0.08);
+            return this.model.WInput;
+        },
+        getInputVector: function(sourceIndex) {
+            var g = new Graph;
+            return g.pluckRow(this.model['WInput'],sourceIndex);
+        },
+
     }
+
+    var maxi = function(w) {
+        // argmax of array w
+        var maxValue = w[0];
+        var maxIndex = 0;
+        for (var i = 1, n = w.length; i < n; i++) {
+            if (w[i] > maxValue) {
+                maxIndex = i;
+                maxValue = w[i];
+            }
+        }
+        return maxIndex;
+    };
+
+    var samplei = function(w) {
+        // sample argmax from w, assuming w are probabilities
+        // that sum to one
+        var r = Math.random();
+        var x = 0.0;
+        var i = 0;
+        while(true) {
+            x += w[i];
+            if (x > r) {return i}
+            i++;
+        }
+    };
+
+    globalAccess.NeuralNetwork = NeuralNetwork;
 
 })(Neuraljs);
