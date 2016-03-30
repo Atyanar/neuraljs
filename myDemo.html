@@ -28,7 +28,7 @@
     <script type="text/javascript">
         var letterSize = 5; // size of letter embeddings
         var regularizationConstant = 0.000001; // L2 regularization strength
-        var learningRate = 0.01;
+        var learningRate = 0.005;
         var clipValue = 5.0; // clip gradients at this value
         var numberSamples = 5;
         var dataSentences = [];
@@ -38,7 +38,7 @@
         var network = {};
         var inputSize = -1;
         var outputSize = -1;
-        var epochSize = -1; // TODO: what is an epoch?
+        var epochSize = -1;
         var maxCharsGenerated = 100;
 
         var initVocabulary = function(sentences, countThreshold) {
@@ -73,17 +73,16 @@
             inputSize = vocabulary.length + 1;
             outputSize = vocabulary.length + 1;
             epochSize = sentences.length;
-            // TODO: output the different characters you found
             var string = '';
             for (var i = 0; i < vocabulary.length; i++) {
                 string += vocabulary[i];
             }
-            $('#charactersFound').html('Characters found: ' + string);
+            $('#charactersFound').html(vocabulary.length + ' different characters found: ' + string);
 
         }
 
         var reinit = function() {
-            // process the input TODO: maybe filter out blanks?
+            // process the input and filter out blanks
             var dataSentencesRaw = $('#textInput').val().split('\n');
             for (var i = 0, n = dataSentencesRaw.length; i < n; i++) {
                 var sentence = dataSentencesRaw[i].trim();
@@ -103,17 +102,7 @@
             var hiddenSizes = JSON.parse($('#NetworkSize').val());
             network.initialize( letterSize, hiddenSizes, outputSize);
             network.generateInputMatrix(inputSize);
-        }
-
-        var costFunction = function(sentence){
-            n = sentence.length;
-            for (var i = -1; i < n; i++) {
-                var source = 0; // TODO: change value to actual vector
-                var target = 0;
-                network.costFunction(source, target);
-            }
-
-        }
+        };
 
         var tickCount = 0;
         var tick = function() {

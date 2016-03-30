@@ -111,8 +111,8 @@ var Neuraljs = {};
     }
     Graph.prototype = {
         performBackpropagation: function() {
-            for ( var i = this.backprop.length - 1; i <= 0; i--) {
-                this.backprop[i]; // execution of one function
+            for ( var i = this.backprop.length - 1; i >= 0; i--) {
+                this.backprop[i](); // execution of one function
             }
         },
         pluckRow: function(matrix, rowIndex) {
@@ -161,7 +161,7 @@ var Neuraljs = {};
                 var backward = function() {
                     for (var i = 0; i < n; i++) {
                         var matrixWi = out.w[i];
-                        m.dw[i] += matrixWi * (1.0 - matrixWi) * out.dw[i];
+                        matrix.dw[i] += matrixWi * (1.0 - matrixWi) * out.dw[i];
                     }
                 }
                 this.backprop.push(backward);
@@ -565,7 +565,6 @@ var Neuraljs = {};
                     throw new Error('Unknown type of NeuralNetwork');
             }
             this.predictPreviousNodes = forward;
-            // prev = lh; // TODO:
             var logProbabilities = forward.output;
 
 
@@ -602,7 +601,7 @@ var Neuraljs = {};
             var probabilities = softmax(logProbabilities);
 
             // TODO: refactor so targetIndex does not have to be input?
-            logToPerplexity += Math.log2(probabilities.w[targetIndex]); // accumulate base 2 log prob and do smoothing
+            logToPerplexity += -Math.log2(probabilities.w[targetIndex]); // accumulate base 2 log prob and do smoothing
             cost += -Math.log(probabilities.w[targetIndex]);
 
             // write gradients into logProbabilities;
