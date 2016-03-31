@@ -28,7 +28,7 @@
     <script type="text/javascript">
         var letterSize = 5; // size of letter embeddings
         var regularizationConstant = 0.000001; // L2 regularization strength
-        var learningRate = 0.005;
+        var learningRate = 0.01;
         var clipValue = 5.0; // clip gradients at this value
         var numberSamples = 5;
         var dataSentences = [];
@@ -40,6 +40,7 @@
         var outputSize = -1;
         var epochSize = -1;
         var maxCharsGenerated = 100;
+        var tickCount = 0;
 
         var initVocabulary = function(sentences, countThreshold) {
             // go over all characters and keep track of all unique ones seen
@@ -55,8 +56,9 @@
 
             // filter by countThreshold
             vocabulary = [];
-            letterToIndex = [];
-            indexToLetter = [];
+            letterToIndex = {};
+            indexToLetter = {};
+            // start at one because zero will be for start and end tokens
             var q = 1;
             for (var character in d) {
                 if (d.hasOwnProperty(character)) {
@@ -73,11 +75,7 @@
             inputSize = vocabulary.length + 1;
             outputSize = vocabulary.length + 1;
             epochSize = sentences.length;
-            var string = '';
-            for (var i = 0; i < vocabulary.length; i++) {
-                string += vocabulary[i];
-            }
-            $('#charactersFound').html(vocabulary.length + ' different characters found: ' + string);
+            $('#charactersFound').html(vocabulary.length + ' different characters found: ' + vocabulary.join(''));
 
         }
 
@@ -90,9 +88,7 @@
                     dataSentences.push(sentence);
                 }
             }
-            dataSentences = dataSentencesRaw.map(function(currentValue) {
-                return currentValue.trim();
-            })
+
             initVocabulary(dataSentences, 1);
 
             var networkType = $('input[name=radioNetwork]:checked').val();
@@ -102,9 +98,30 @@
             var hiddenSizes = JSON.parse($('#NetworkSize').val());
             network.initialize( letterSize, hiddenSizes, outputSize);
             network.generateInputMatrix(inputSize);
+
+            tickCount = 0;
         };
 
-        var tickCount = 0;
+        var costFunction = function(network, sentence) {
+            var costReturn = {};
+            var cost = 0.0;
+            var log2perplexity = 0.0;
+            for (var i = -1, n = sentence.length; i < n; i++) {
+                // start and end token are zeros
+                var sourceIndex = (i === -1 ? 0 : letterToIndex[sentence[i]]);
+                var targetIndex = (i === n-1 ? 0 : letterToIndex[sentence[i+1]]);
+
+                costReturn = network.costFunction(network.getInputVector(sourceIndex), network.getInputVector(targetIndex), targetIndex);
+                cost += costReturn.cost;
+                log2perplexity += costReturn.perplexity;
+            }
+            // TODO: the user should not have to do this
+            var perplexity = Math.pow(2, log2perplexity / (sentence.length - 1));
+            var costPerplexityDiv = '<div> perplexity: ' + perplexity.toFixed(1) + ' cost: ' + cost.toFixed(1) + '</div>';
+            $('#costPerplexity').html(costPerplexityDiv);
+            // TODO: evaluate accumulated output of the costFunction
+        }
+
         var tick = function() {
             // sample sentence from data
             var sentenceIndex = Math.floor(Math.random() * dataSentences.length);
@@ -113,25 +130,7 @@
             var time0 = (new Date()).getTime();
 
             // evaluate cost of a sentence
-            var costReturn = {};
-            var cost = 0.0;
-            var perplexity = 0.0;
-            for (var i = -1, n = sentence.length; i < n; i++) {
-                // start and end token are zeros
-                var sourceIndex = (i === -1 ? 0 : letterToIndex[sentence[i]]);
-                var targetIndex = (i === n-1 ? 0 : letterToIndex[sentence[i+1]]);
-
-                costReturn = network.costFunction(network.getInputVector(sourceIndex), network.getInputVector(targetIndex), targetIndex);
-                cost += costReturn.cost;
-                perplexity += costReturn.perplexity;
-            }
-            // TODO: the user should not have to do this
-            perplexity = Math.pow(2, perplexity / (sentence.length - 1));
-            var costPerplexityDiv = '<div> perplexity: ' + perplexity + ' cost: ' + cost + '</div>';
-            $('#costPerplexity').html(costPerplexityDiv);
-            // TODO: evaluate accumulated output of the costFunction
-
-
+            costFunction(network, sentence);
 
             //compute backpropagation
             network.backward();
@@ -139,29 +138,46 @@
             // perform parameter update
             network.parameterUpdate(learningRate, regularizationConstant, clipValue); // TODO: make it so that these parameters are optional
 
-            var time1 = (new Date()).getTime;
+            var time1 = (new Date()).getTime();
             var tickTime = time1 - time0;
+
             tickCount++;
-            $('#ticks').html(tickCount);
+
+            if (tickCount % (Math.floor(epochSize/100)) === 0) {
+                $('#epochs').text('Epoch: ' + (tickCount/epochSize).toFixed(2));
+            }
+            if (tickCount  % epochSize === 0) {
+                learningRate *= 0.9;
+            }
+
+            if (tickCount % 10) {
+                $('#ticktime').text('forw/bwd time per example: ' + tickTime.toFixed(1) + 'ms');
+            }
             if (tickCount % 50 === 0) {
                 $('#samples').html('');
+                var prediction;
+                var predictionDiv;
                 for (var j = 0; j < numberSamples; j++) {
-                    var prediction = getSentence(network);
-                    var predictionDiv = '<div class="aprediction">' + prediction + '</div>';
+                    prediction = getSentence(network, true);
+                    predictionDiv = '<div class="aprediction">' + prediction + '</div>';
                     $('#samples').append(predictionDiv);
                 }
+                prediction = getSentence(network, false);
+                predictionDiv = '<div class="aprediction">' + prediction + '</div>';
+                $('#greedySamples').html(predictionDiv);
+
             }
 
 
 
         }
 
-        var getSentence = function(network) {
+        var getSentence = function(network, useSamplei) {
             var string = '';
             while (true) {
                 var index = string.length === 0 ? 0 : letterToIndex[string[string.length-1]];
                 var sourceVector = network.getInputVector(index);
-                var prediction = network.predictOutput(sourceVector, 1.0, true);
+                var prediction = network.predictOutput(sourceVector, 1.0, useSamplei);
 
 
                 if (prediction === 0) break;
@@ -186,7 +202,7 @@
                 iid = null;
             });
             $('#resume').click(function() {
-                if (iid !== null) {
+                if (iid === null) {
                     iid = setInterval(tick, 0);
                 }
             });
@@ -1660,11 +1676,16 @@ silicon valley doesn't look like boston, or new york, or la, or dc
     </form>
 
     <div id="ticks"></div>
+    <div id="epochs"></div>
+    <div id="ticktime"></div>
     <div id="costPerplexity"></div>
     <h2> Generated sample sentences: </h2>
     <div id="samples">
 
     </div>
+    <h2> Greedy Sample Sentence: </h2>
+    <div id="greedySamples"></div>
+
 </div>
 
 </body>

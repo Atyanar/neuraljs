@@ -111,13 +111,13 @@ var Neuraljs = {};
     }
     Graph.prototype = {
         performBackpropagation: function() {
-            for ( var i = this.backprop.length - 1; i >= 0; i--) {
-                this.backprop[i](); // execution of one function
+            while (this.backprop.length > 0) {
+                this.backprop.pop()();
             }
         },
         pluckRow: function(matrix, rowIndex) {
             // returns the row as a column vector
-            assert((rowIndex >= 0) && (rowIndex <= matrix.rows));
+            assert((rowIndex >= 0) && (rowIndex < matrix.rows));
             var columns = matrix.columns;
             var out = new Matrix(columns, 1);
             for (var i = 0; i < columns; i++) {
@@ -143,8 +143,10 @@ var Neuraljs = {};
 
             if (this.needsBackpropagation) {
                 var backward = function() {
-                    var matrixWi = out.w[i];
-                    matrix.dw[i] += (1.0 - matrixWi * matrixWi) * out.dw[i];
+                    for (var i = 0; i < n; i++) {
+                        var matrixWi = out.w[i];
+                        matrix.dw[i] += (1.0 - matrixWi * matrixWi) * out.dw[i];
+                    }
                 }
                 this.backprop.push(backward);
             }
@@ -204,13 +206,13 @@ var Neuraljs = {};
 
             if (this.needsBackpropagation) {
                 var backward = function() {
-                    var help;
+                    var outDw;
                     for (i = 0; i < rows; i++) {
                         for (j = 0; j < columns; j++) {
-                            help = out.dw[columns * i + j];
+                            outDw = out.dw[columns * i + j];
                             for (k = 0; k < matrix1.columns; k++) {
-                                matrix1.dw[matrix1.columns * i + k] += matrix2.w[matrix2.columns * k + j] * help;
-                                matrix2.dw[matrix2.columns * k + j] += matrix1.w[matrix1.columns * i + k] * help;
+                                matrix1.dw[matrix1.columns * i + k] += matrix2.w[matrix2.columns * k + j] * outDw;
+                                matrix2.dw[matrix2.columns * k + j] += matrix1.w[matrix1.columns * i + k] * outDw;
                             }
                         }
                     }
@@ -223,15 +225,15 @@ var Neuraljs = {};
             assert(matrix1.w.length === matrix2.w.length && matrix1.rows === matrix2.rows, 'matrix dimensions not compatible for addition');
 
             var out = new Matrix(matrix1.rows, matrix1.columns);
-            for (var i = 0; i < matrix1.w.length; i++) {
+            for (var i = 0, n = matrix1.w.length; i < n; i++) {
                 out.w[i] = matrix1.w[i] + matrix2.w[i];
             }
 
             if (this.needsBackpropagation) {
                 var backward = function() {
-                    for (var i = 0; i < matrix1.w.length; i++) {
-                        matrix1.dw[i] += matrix2.w[i] * out.dw[i];
-                        matrix2.dw[i] += matrix1.w[i] * out.dw[i];
+                    for (var i = 0, n = matrix1.w.length; i < n; i++) {
+                        matrix1.dw[i] += out.dw[i];
+                        matrix2.dw[i] += out.dw[i];
                     }
                 }
                 this.backprop.push(backward);
@@ -242,13 +244,13 @@ var Neuraljs = {};
             assert(matrix1.w.length === matrix2.w.length, 'matrix dimensions not compatible for element-multiplication');
 
             var out = new Matrix(matrix1.rows, matrix1.columns);
-            for (var i = 0; i < matrix1.w.length; i++) {
+            for (var i = 0, n = matrix1.w.length; i < n; i++) {
                 out.w[i] = matrix1.w[i] * matrix2.w[i];
             }
 
             if (this.needsBackpropagation) {
                 var backward = function() {
-                    for (var i = 0; i < matrix1.w.length; i++) {
+                    for (var i = 0, n = matrix1.w.length; i < n; i++) {
                         matrix1.dw[i] += matrix2.w[i] * out.dw[i];
                         matrix2.dw[i] += matrix1.w[i] * out.dw[i];
                     }
@@ -267,7 +269,7 @@ var Neuraljs = {};
         }
 
         var sum = 0.0;
-        for (i = 0,n = matrix.w.length; i < n; i++) {
+        for (i = 0, n = matrix.w.length; i < n; i++) {
             out.w[i] = Math.exp(matrix.w[i] - maxVal);
             sum += out.w[i];
         }
@@ -596,7 +598,6 @@ var Neuraljs = {};
             var cost = 0.0;
             var graph = this.graph;
             var forward = this.forward(graph, sourceVector);
-            // prev =
             var logProbabilities = forward.output;
             var probabilities = softmax(logProbabilities);
 
@@ -604,7 +605,7 @@ var Neuraljs = {};
             logToPerplexity += -Math.log2(probabilities.w[targetIndex]); // accumulate base 2 log prob and do smoothing
             cost += -Math.log(probabilities.w[targetIndex]);
 
-            // write gradients into logProbabilities;
+            // write gradients into logProbabilities - for backpropagation
             logProbabilities.dw = probabilities.w;
             logProbabilities.dw[targetIndex] -= 1;
 
