@@ -26,9 +26,10 @@
     <script src="external/jquery-ui.min.js"></script>
     <script src="src/mine.js"></script>
     <script type="text/javascript">
-        var letterSize = 5; // size of letter embeddings
+        var letterSize = 10; // size of letter embeddings
         var regularizationConstant = 0.000001; // L2 regularization strength
-        var learningRate = 0.01;
+        var initialLearningRate = 0.001;
+        var learningRate = initialLearningRate;
         var clipValue = 5.0; // clip gradients at this value
         var numberSamples = 5;
         var dataSentences = [];
@@ -100,6 +101,7 @@
             network.generateInputMatrix(inputSize);
 
             tickCount = 0;
+            learningRate = initialLearningRate;
         };
 
         var costFunction = function(network, sentence) {
@@ -146,7 +148,7 @@
             if (tickCount % (Math.floor(epochSize/100)) === 0) {
                 $('#epochs').text('Epoch: ' + (tickCount/epochSize).toFixed(2));
             }
-            if (tickCount  % epochSize === 0) {
+            if (tickCount  % (Math.floor(epochSize)) === 0) {
                 learningRate *= 0.9;
             }
 
@@ -165,6 +167,8 @@
                 prediction = getSentence(network, false);
                 predictionDiv = '<div class="aprediction">' + prediction + '</div>';
                 $('#greedySamples').html(predictionDiv);
+                console.log(prediction);
+                console.log(learningRate);
 
             }
 
@@ -177,7 +181,7 @@
             while (true) {
                 var index = string.length === 0 ? 0 : letterToIndex[string[string.length-1]];
                 var sourceVector = network.getInputVector(index);
-                var prediction = network.predictOutput(sourceVector, 1.0, useSamplei);
+                var prediction = network.predictOutput(sourceVector, useSamplei, 1.0);
 
 
                 if (prediction === 0) break;
@@ -1668,11 +1672,11 @@ silicon valley doesn't look like boston, or new york, or la, or dc
     <form>
         <fieldset>
             <input type="radio" id="RNNRadio" name="radioNetwork" value="RNN"> Recurrent Neural Network (RNN) <br>
-            <input type="radio" id="LSTMRadio" name="radioNetwork" value="LSTM" checked="checked"> Long Short-Term Memory (LSTM) <br>
-            <input type="radio" id="GRURadio" name="radioNetwork" value="GRU"> Gated Recurrent Unit (GRU) <br>
+            <input type="radio" id="LSTMRadio" name="radioNetwork" value="LSTM"> Long Short-Term Memory (LSTM) <br>
+            <input type="radio" id="GRURadio" name="radioNetwork" value="GRU" checked="checked"> Gated Recurrent Unit (GRU) <br>
         </fieldset>
         List of sizes of the hidden layers:
-        <input type="text" name="sizeOfNetwork" id="NetworkSize" value="[30,30,30,30]">
+        <input type="text" name="sizeOfNetwork" id="NetworkSize" value="[20,20]">
     </form>
 
     <div id="ticks"></div>

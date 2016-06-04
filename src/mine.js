@@ -27,7 +27,7 @@ var Neuraljs = {};
 
         var r = u*u + v*v;
 
-        if (r === 0 || r > 1) return gaussRandom();
+        if (r == 0 || r > 1) return gaussRandom();
 
         var c = Math.sqrt(-2*Math.log(r)/r);
         gaussValueV = v*c; // cached for return on next call
@@ -57,12 +57,12 @@ var Neuraljs = {};
     };
     Matrix.prototype = {
         get: function(row, column) {
-            var index = (this.rows * row) + column;
+            var index = (this.columns * row) + column;
             assert((index >= 0) && (index < this.w.length));
             return this.w[index];
         },
         set: function(row, column, value) {
-            var index = (this.rows * row) + column;
+            var index = (this.columns * row) + column;
             assert((index >= 0) && (index < this.w.length));
             this.w[index] = value;
         },
@@ -87,7 +87,7 @@ var Neuraljs = {};
     var RandomMatrix = function(rows, columns, std) {
 
         var fillRandom = function(matrix, low, high) {
-            for(var i = 0, n = matrix.rows * matrix.columns; i < n; i++) {
+            for (var i = 0, n = matrix.rows * matrix.columns; i < n; i++) {
                 matrix.w[i] = Math.random()*(high-low)+low;
             }
         };
@@ -108,7 +108,7 @@ var Neuraljs = {};
 
         // this stores a list of functions that perform the backpropagation in the right order
         this.backprop = [];
-    }
+    };
     Graph.prototype = {
         performBackpropagation: function() {
             while (this.backprop.length > 0) {
@@ -259,7 +259,7 @@ var Neuraljs = {};
             }
             return out;
         },
-    }
+    };
 
     var softmax = function(matrix) {
         var out = new Matrix(matrix.rows, matrix.columns);
@@ -278,9 +278,11 @@ var Neuraljs = {};
         }
 
         return out;
-    }
+    };
 
     var forwardRNN = function(graph, model, previousNodes, hiddenSizes, sourceVector){
+
+        // TODO: does not seem to work?
         // sourceVector is a 1D vector with observations
         var previousHiddenNodes = [];
         if (typeof previousNodes.hidden === 'undefined') {
@@ -292,7 +294,7 @@ var Neuraljs = {};
         }
 
         var hiddenResults = [];
-        for (var depth = 0; depth < hiddenSizes.length; depth++) {
+        for (depth = 0; depth < hiddenSizes.length; depth++) {
 
             var inputVector = (depth === 0 ? sourceVector : hiddenResults[depth - 1]);
             var previousHiddenNode = previousHiddenNodes[depth];
@@ -314,11 +316,62 @@ var Neuraljs = {};
         // return hidden representation and output
         return {'output': output, 'hidden': hiddenResults};
 
-        // TODO: original: return {'h':hiddenResults, 'o': output};
-
     };
 
     var forwardGRU = function(graph, model, previousNodes, hiddenSizes, sourceVector){
+
+        var previousHiddenNodes = [];
+        if (typeof previousNodes.hidden === 'undefined') {
+            for (var depth = 0; depth < hiddenSizes.length; depth++) {
+                previousHiddenNodes.push( new Matrix(hiddenSizes[depth], 1));
+            }
+        } else {
+            previousHiddenNodes = previousNodes.hidden;
+        }
+
+        var hiddenResults = [];
+        for (depth = 0; depth < hiddenSizes.length; depth++) {
+            var inputVector = ( depth === 0 ? sourceVector : hiddenResults[depth - 1]);
+            var previousHiddenNode = previousHiddenNodes[depth];
+
+            // reset gate
+            var hidden0 = graph.mul(model['Wrxh' + depth], inputVector);
+            var hidden1 = graph.mul(model['Wrhh' + depth], previousHiddenNode);
+            var resetGate = graph.sigmoid(graph.add(graph.add(hidden0, hidden1), model['br' + depth]));
+
+            // update gate
+            var hidden2 = graph.mul(model['Wzxh' + depth], inputVector);
+            var hidden3 = graph.mul(model['Wzhh' + depth], previousHiddenNode);
+            var updateGate = graph.sigmoid(graph.add(graph.add(hidden2, hidden3), model['bz' + depth]));
+
+
+            // cell
+            var hidden4 = graph.mul(model['Wcxh' + depth], inputVector);
+            var hidden5 = graph.mul(model['Wchh' + depth], graph.eltmul(resetGate, previousHiddenNode));
+            var cell = graph.tanh(graph.add(graph.add(hidden4, hidden5), model['bc' + depth]));
+
+            // TODO: do this in a more sophisticated manner?
+            // compute hidden state as gated, saturated cell activations
+            var allOnes = new Matrix(updateGate.rows, updateGate.columns);
+            for (var i = 0; i < allOnes.w.length; i++) {
+                allOnes.w[i] = 1;
+            }
+            // negate updateGate
+            var negUpdateGate = new Matrix(updateGate.rows, updateGate.columns);
+            for (i = 0; i < updateGate.w.length; i++) {
+                negUpdateGate.w[i] = -updateGate.w[i];
+            }
+            var hiddenAtDepth = graph.add(graph.eltmul(graph.add(allOnes,negUpdateGate), cell), graph.eltmul(previousHiddenNode, updateGate));
+
+            hiddenResults.push(hiddenAtDepth);
+        }
+
+        // decode results of last hidden unit to output
+        var output = graph.add(graph.mul(model['Whd'], hiddenResults[hiddenResults.length - 1]), model['bd']);
+
+        // return hidden representation and output
+        return {'output': output, 'hidden': hiddenResults}
+
 
     };
 
@@ -435,11 +488,22 @@ var Neuraljs = {};
                         break;
 
                     case 'GRU':
-                        // TODO: to be implemented
+                        // reset Gate
+                        this.model['Wrxh' + depth] = new RandomMatrix(hiddenSize, prevSize, 0.08);
+                        this.model['Wrhh' + depth] = new RandomMatrix(hiddenSize, hiddenSize, 0.08);
+                        this.model['br' + depth] = new Matrix(hiddenSize, 1);
+                        // update Gate
+                        this.model['Wzxh' + depth] = new RandomMatrix(hiddenSize, prevSize, 0.08);
+                        this.model['Wzhh' + depth] = new RandomMatrix(hiddenSize, hiddenSize, 0.08);
+                        this.model['bz' + depth] = new Matrix(hiddenSize, 1);
+                        // cell write parameters
+                        this.model['Wcxh' + depth] = new RandomMatrix(hiddenSize, prevSize, 0.08);
+                        this.model['Wchh' + depth] = new RandomMatrix(hiddenSize, hiddenSize, 0.08);
+                        this.model['bc' + depth] = new Matrix(hiddenSize, 1);
                         break;
 
                     case 'LSTM':
-                        // gates parameters
+                        // gate parameters
                         // input gate: - input to hidden, hidden to hidden and bias vector
                         this.model['Wixh' + depth] = new RandomMatrix(hiddenSize, prevSize, 0.08);
                         this.model['Wihh' + depth] = new RandomMatrix(hiddenSize, hiddenSize, 0.08);
@@ -457,7 +521,6 @@ var Neuraljs = {};
                         this.model['Wcxh' + depth] = new RandomMatrix(hiddenSize, prevSize, 0.08);
                         this.model['Wchh' + depth] = new RandomMatrix(hiddenSize, hiddenSize, 0.08);
                         this.model['bc' + depth] = new Matrix(hiddenSize, 1);
-
                         break;
 
                     default:
@@ -516,12 +579,12 @@ var Neuraljs = {};
                     if (!(key in this.stepCache)) {
                         this.stepCache[key] = new Matrix(matrix.rows, matrix.columns);
                     }
-                    var s = this.stepCache[key];
+                    var stepCacheMatrix = this.stepCache[key];
                     for (var i = 0, n = matrix.w.length; i < n; i++) {
 
                         // rmsprop adaptive learning rate
                         var matrixDwi = matrix.dw[i];
-                        s.w[i] = s.w[i] * this.decayRate + (1.0 - this.decayRate) * matrixDwi * matrixDwi;
+                        stepCacheMatrix.w[i] = stepCacheMatrix.w[i] * this.decayRate + (1.0 - this.decayRate) * matrixDwi * matrixDwi;
 
                         // gradient clip
                         if (matrixDwi > this.clipValue) {
@@ -535,7 +598,7 @@ var Neuraljs = {};
                         numberTotalOperations++;
 
                         // update and regularize
-                        matrix.w[i] += - learningRate * matrixDwi / Math.sqrt(s.w[i] + this.smoothEps) - this.regularizationConstant * matrix.w[i];
+                        matrix.w[i] += - learningRate * matrixDwi / Math.sqrt(stepCacheMatrix.w[i] + this.smoothEps) - this.regularizationConstant * matrix.w[i];
                         matrix.dw[i] = 0; // reset gradients for next iteration
                     }
                 }
@@ -543,13 +606,13 @@ var Neuraljs = {};
             statistics['ratioClipped'] = numberClipped / numberTotalOperations;
 
             // TODO: explain the reset of the predict values here or do it differently - this is not intuitive!
-            // reset predict Nodes after a the network is newly trained
+            // reset predict Nodes after the network is newly trained
             this.predictPreviousNodes = {};
             this.predictGraph = new Graph(false);
 
             return statistics;
         },
-        predictOutput: function(sourceVector, temperature, useSamplei) { // TODO: think about input and output
+        predictOutput: function(sourceVector, useSamplei, temperature) { // TODO: think about input and output
             if (typeof useSamplei === 'undefined') { useSamplei = false; }
             if (typeof temperature === 'undefined') { temperature = 1.0; }
             var forward = {};
