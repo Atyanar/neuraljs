@@ -26,24 +26,24 @@
     <script src="external/jquery-ui.min.js"></script>
     <script src="src/mine.js"></script>
     <script type="text/javascript">
-        var letterSize = 10; // size of letter embeddings
-        var regularizationConstant = 0.000001; // L2 regularization strength
-        var initialLearningRate = 0.001;
-        var learningRate = initialLearningRate;
-        var clipValue = 5.0; // clip gradients at this value
-        var numberSamples = 5;
-        var dataSentences = [];
-        var vocabulary = [];
-        var letterToIndex = [];
-        var indexToLetter = [];
-        var network = {};
-        var inputSize = -1;
-        var outputSize = -1;
-        var epochSize = -1;
-        var maxCharsGenerated = 100;
-        var tickCount = 0;
+        var letterSize = 5, // size of letter embeddings
+            regularizationConstant = 0.000001, // L2 regularization strength
+            initialLearningRate = 0.001,
+            learningRate = initialLearningRate,
+            clipValue = 1, // clip gradients at this value
+            numberSamples = 5,
+            dataSentences = [],
+            vocabulary = [],
+            letterToIndex = [],
+            indexToLetter = [],
+            network = {},
+            inputSize = -1,
+            outputSize = -1,
+            epochSize = -1,
+            maxCharsGenerated = 100,
+            tickCount = 0;
 
-        var initVocabulary = function(sentences, countThreshold) {
+        function initVocabulary(sentences, countThreshold) {
             // go over all characters and keep track of all unique ones seen
             var text = sentences.join('');
 
@@ -80,7 +80,7 @@
 
         }
 
-        var reinit = function() {
+        function reinit() {
             // process the input and filter out blanks
             var dataSentencesRaw = $('#textInput').val().split('\n');
             for (var i = 0, n = dataSentencesRaw.length; i < n; i++) {
@@ -97,34 +97,36 @@
             network = new Neuraljs.NeuralNetwork(networkType);
 
             var hiddenSizes = JSON.parse($('#NetworkSize').val());
-            network.initialize( letterSize, hiddenSizes, outputSize);
+            network.initialize(letterSize, hiddenSizes, outputSize);
             network.generateInputMatrix(inputSize);
 
             tickCount = 0;
             learningRate = initialLearningRate;
-        };
-
-        var costFunction = function(network, sentence) {
-            var costReturn = {};
-            var cost = 0.0;
-            var log2perplexity = 0.0;
-            for (var i = -1, n = sentence.length; i < n; i++) {
-                // start and end token are zeros
-                var sourceIndex = (i === -1 ? 0 : letterToIndex[sentence[i]]);
-                var targetIndex = (i === n-1 ? 0 : letterToIndex[sentence[i+1]]);
-
-                costReturn = network.costFunction(network.getInputVector(sourceIndex), network.getInputVector(targetIndex), targetIndex);
-                cost += costReturn.cost;
-                log2perplexity += costReturn.perplexity;
-            }
-            // TODO: the user should not have to do this
-            var perplexity = Math.pow(2, log2perplexity / (sentence.length - 1));
-            var costPerplexityDiv = '<div> perplexity: ' + perplexity.toFixed(1) + ' cost: ' + cost.toFixed(1) + '</div>';
-            $('#costPerplexity').html(costPerplexityDiv);
-            // TODO: evaluate accumulated output of the costFunction
         }
 
-        var tick = function() {
+        // TODO: add comments to explain what everything (especially the functions) does
+        function costFunction(network, sentence) {
+
+            var inputVectorArray = [],
+                targetIndexArray = [],
+                i,
+                n = sentence.length,
+                sourceIndex,
+                targetIndex,
+                result,
+                costPerplexityDiv;
+            for (i = -1; i < n; i++) {
+                sourceIndex = (i === -1 ? 0 : letterToIndex[sentence[i]]);
+                targetIndex = (i === n -1 ? 0 : letterToIndex[sentence[i + 1]]);
+                inputVectorArray.push(network.getInputVector(sourceIndex));
+                targetIndexArray.push(targetIndex);
+            }
+            result = network.batchCostFunction(inputVectorArray, targetIndexArray);
+            costPerplexityDiv = '<div> perplexity: ' + result.perplexity.toFixed(1) + ' cost: ' + result.cost.toFixed(1) + '</div>';
+            $('#costPerplexity').html(costPerplexityDiv);
+        }
+
+        function tick() {
             // sample sentence from data
             var sentenceIndex = Math.floor(Math.random() * dataSentences.length);
             var sentence = dataSentences[sentenceIndex];
@@ -137,8 +139,8 @@
             //compute backpropagation
             network.backward();
 
-            // perform parameter update
-            network.parameterUpdate(learningRate, regularizationConstant, clipValue); // TODO: make it so that these parameters are optional
+            // perform parameter update - learning Rate not optional
+            network.parameterUpdate(learningRate, regularizationConstant, clipValue);
 
             var time1 = (new Date()).getTime();
             var tickTime = time1 - time0;
@@ -149,7 +151,7 @@
                 $('#epochs').text('Epoch: ' + (tickCount/epochSize).toFixed(2));
             }
             if (tickCount  % (Math.floor(epochSize)) === 0) {
-                learningRate *= 0.9;
+                learningRate *= 0.99;
             }
 
             if (tickCount % 10) {
@@ -172,16 +174,14 @@
 
             }
 
-
-
         }
 
-        var getSentence = function(network, useSamplei) {
+        function getSentence(network, useSampling) {
             var string = '';
             while (true) {
                 var index = string.length === 0 ? 0 : letterToIndex[string[string.length-1]];
                 var sourceVector = network.getInputVector(index);
-                var prediction = network.predictOutput(sourceVector, useSamplei, 1.0);
+                var prediction = network.predictOutput(sourceVector, useSampling, 1.0);
 
 
                 if (prediction === 0) break;
