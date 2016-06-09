@@ -26,12 +26,18 @@
     <script src="external/jquery-ui.min.js"></script>
     <script src="src/neural.js"></script>
     <script type="text/javascript">
+
+        /*
+         * parameter for the neural network and variable declarations
+         */
+
         var letterSize = 5, // size of letter embeddings
             regularizationConstant = 0.000001, // L2 regularization strength
             initialLearningRate = 0.001,
             learningRate = initialLearningRate,
             clipValue = 1, // clip gradients at this value
             numberSamples = 5,
+            learningRateAnnealing = 0.99,
             dataSentences = [],
             vocabulary = [],
             letterToIndex = [],
@@ -43,8 +49,12 @@
             maxCharsGenerated = 100,
             tickCount = 0;
 
+        /*
+         *  scans through all sentences and creates the vocabulary of all unique chars
+         */
+
         function initVocabulary(sentences, countThreshold) {
-            // go over all characters and keep track of all unique ones seen
+
             var text = sentences.join('');
 
             // count all characters
@@ -80,6 +90,9 @@
 
         }
 
+        /*
+         *  (re)initializes the vocabulary, network and learningRate
+         */
         function reinit() {
             // process the input and filter out blanks
             var dataSentencesRaw = $('#textInput').val().split('\n');
@@ -104,7 +117,10 @@
             learningRate = initialLearningRate;
         }
 
-        // TODO: add comments to explain what everything (especially the functions) does
+        /*
+         *  function that calculates the perplexity and cost for a single sentence
+         *  - also performs forward passes for every character
+         */
         function costFunction(network, sentence) {
 
             var inputVectorArray = [],
@@ -126,6 +142,29 @@
             $('#costPerplexity').html(costPerplexityDiv);
         }
 
+        /*
+         * function that creates a sentence as predicted by the network
+         */
+        function getSentence(network, useSampling) {
+            var string = '';
+            while (true) {
+                var index = string.length === 0 ? 0 : letterToIndex[string[string.length-1]];
+                var sourceVector = network.getInputVector(index);
+                var prediction = network.predictOutput(sourceVector, useSampling, 1.0);
+
+
+                if (prediction === 0) break;
+                if (string.length > maxCharsGenerated) break;
+                string += indexToLetter[prediction];
+
+            }
+            return string;
+        }
+
+        /*
+         *  function that gets called in a loop while the user has not hit pause
+         *  it performs one full cycle of the neural network with one sentence as batch of input
+         */
         function tick() {
             // sample sentence from data
             var sentenceIndex = Math.floor(Math.random() * dataSentences.length);
@@ -151,7 +190,8 @@
                 $('#epochs').text('Epoch: ' + (tickCount/epochSize).toFixed(2));
             }
             if (tickCount  % (Math.floor(epochSize)) === 0) {
-                learningRate *= 0.99;
+                // anneals the learning rate slowly over time
+                learningRate *= learningRateAnnealing;
             }
 
             if (tickCount % 10) {
@@ -174,22 +214,6 @@
 
             }
 
-        }
-
-        function getSentence(network, useSampling) {
-            var string = '';
-            while (true) {
-                var index = string.length === 0 ? 0 : letterToIndex[string[string.length-1]];
-                var sourceVector = network.getInputVector(index);
-                var prediction = network.predictOutput(sourceVector, useSampling, 1.0);
-
-
-                if (prediction === 0) break;
-                if (string.length > maxCharsGenerated) break;
-                string += indexToLetter[prediction];
-
-            }
-            return string;
         }
 
         var iid = null;
