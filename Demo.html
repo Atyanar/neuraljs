@@ -43,7 +43,7 @@
             letterToIndex = [],
             indexToLetter = [],
             network = {},
-            inputSize = -1,
+            vocabularySize = -1,
             outputSize = -1,
             epochSize = -1,
             maxCharsGenerated = 100,
@@ -83,7 +83,7 @@
                 }
             }
 
-            inputSize = vocabulary.length + 1;
+            vocabularySize = vocabulary.length + 1;
             outputSize = vocabulary.length + 1;
             epochSize = sentences.length;
             $('#charactersFound').html(vocabulary.length + ' different characters found: ' + vocabulary.join(''));
@@ -111,7 +111,7 @@
 
             var hiddenSizes = JSON.parse($('#NetworkSize').val());
             network.initialize(letterSize, hiddenSizes, outputSize);
-            network.generateInputMatrix(inputSize);
+            network.generateInputMatrix(vocabularySize);
 
             tickCount = 0;
             learningRate = initialLearningRate;
