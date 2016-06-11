@@ -561,6 +561,7 @@ var Neuraljs = {};
     };
 
     NeuralNetwork.prototype = {
+        // can be overridden by the user if he or she sets the value once
         decayRate: 0.999,
         smoothEps: 1e-8,
         clipValue: 5.0,
